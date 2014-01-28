@@ -2,9 +2,6 @@
 #include "window.h"
 #include "stbi_image.h"
 
-const float default_scale = 10.f;
-const glm::vec2 texture_uv_scale = glm::vec2(100, 100);
-
 bool Triangle::compare(int index1, int index2, int index3) {
 	bool cmp1 = indexes[0] == index1 || indexes[1] == index1 || indexes[2] == index1;
 	bool cmp2 = indexes[0] == index2 || indexes[1] == index2 || indexes[2] == index2;
@@ -42,40 +39,8 @@ Editor * Window::get_editor(Uint32 windowID) {
 	return 0;
 }
 
-Window::Window(SDL_Window * geometry_window, SDL_Window * texture_window, SDL_Window * timeline_window, SDL_GLContext main_context) {
-	Editor geometry_editor;
-	{
-		geometry_editor.type = Geometry;
-		geometry_editor.window = geometry_window;
-		geometry_editor.editor_transform.scale		= default_scale * 4;
-		geometry_editor.editor_transform.position	= glm::vec2(55, 55);
-		editors[Geometry] = geometry_editor;
-	}
-
-	Editor texture_editor;
-	{
-		texture_editor.type = Texture;
-		texture_editor.window = texture_window;
-		texture_editor.editor_transform.scale		= default_scale * 4;
-		texture_editor.editor_transform.position	= glm::vec2(55, 55);
-		editors[Texture]  = texture_editor;
-	}
-
-	Editor timeline;
-	{
-		timeline.type = Timeline;
-		timeline.window = timeline_window;
-		timeline.editor_transform.scale = 1;
-		editors[Timeline]  = timeline;
-	}
-	
-	m_context = main_context;
-
-	glEnableClientState(GL_VERTEX_ARRAY);
-	glEnableClientState(GL_COLOR_ARRAY);
-
-	glGenTextures(1, &m_texture);
-
+Window::Window() {
+	/*
 	add_vertex( glm::vec2(0.f, 0.f) );
 	add_vertex( glm::vec2(100.f, 0.f) );
 	add_vertex( glm::vec2(0.f, 100.f) );
@@ -91,15 +56,23 @@ Window::Window(SDL_Window * geometry_window, SDL_Window * texture_window, SDL_Wi
 		triangles.push_back(t);
 	}
 	state_stack.clear();
-
+	*/
 	wheel_lock = false;
 	mouse_down = false;
 	moving_geometry = false;
 	multiple_selection = false;
 	multiple_selection_init = false;
+	m_background.loaded = m_texture.loaded = false;
+	m_background_edit = false;
 }
 
 void Window::work() {
+	glEnableClientState(GL_VERTEX_ARRAY);
+	glEnableClientState(GL_COLOR_ARRAY);
+
+	glGenTextures(1, &m_texture.name);
+	glGenTextures(1, &m_background.name);
+
 	while (handle_events()) {
 		render_geometry();
 		render_texture();
@@ -124,7 +97,7 @@ bool Window::handle_events() {
 				m_xml_animation_path = filepath;
 				load_geometry();
 			} else {
-				load_texture(filepath);
+				load_texture(filepath, m_background_edit ? m_background : m_texture);
 			}
 		}
 
@@ -142,9 +115,12 @@ bool Window::handle_events() {
 				Editor * editor = get_editor(event.motion.windowID);
 				if (editor) {
 					if (editor->type == Geometry || editor->type == Texture) {
-						float scale = editor->editor_transform.scale;
-						editor->editor_transform.position.x += event.motion.xrel;
-						editor->editor_transform.position.y += event.motion.yrel;
+						if (m_background_edit) {
+							m_background_offset += editor->mouse_global_to_local((float)event.motion.xrel, (float)event.motion.yrel) - editor->mouse_global_to_local(0, 0);
+						} else {
+							editor->editor_transform.position.x += event.motion.xrel;
+							editor->editor_transform.position.y += event.motion.yrel;
+						}
 					}
 				}
 			}
@@ -152,7 +128,9 @@ bool Window::handle_events() {
 				Editor * editor = get_editor(event.wheel.windowID);
 				if (editor) {
 					if (editor->type == Geometry || editor->type == Texture) {
-						editor->editor_transform.scale += event.wheel.y;
+						float deminator = editor->editor_transform.scale > 1 ? log(editor->editor_transform.scale) : 1.f;
+						float new_scale = editor->editor_transform.scale + (event.wheel.y / deminator);
+						editor->editor_transform.scale = std::max(new_scale, 1.f);
 					}
 				}
 			}
@@ -244,6 +222,10 @@ bool Window::handle_events() {
 			if (event.key.keysym.scancode == SDL_SCANCODE_S && keystate[SDL_SCANCODE_LCTRL] != 0) {
 				save_geometry();
 			}
+			if (event.key.keysym.scancode == SDL_SCANCODE_TAB) {
+				m_background_edit = !m_background_edit;
+				SDL_SetWindowTitle(editors[Geometry].window, m_background_edit ? "Background Edit" : "Geometry");
+			}
 		}
 	}
 	return true;
@@ -251,7 +233,7 @@ bool Window::handle_events() {
 
 void Window::render_texture() {
 	Editor & editor = editors[Texture];
-	SDL_GL_MakeCurrent(editor.window, m_context);
+	SDL_GL_MakeCurrent(editor.window, context);
 
 	int width, height;
 	SDL_GL_GetDrawableSize(editor.window, &width, &height);
@@ -266,18 +248,20 @@ void Window::render_texture() {
 	glMatrixMode(GL_MODELVIEW);
 	glLoadMatrixf(glm::value_ptr(view));
 
-	static Vertex texture_pivots[4] = {
-		{ glm::vec2(0.f,	 0.f),	glm::vec2(0.f, 0.f), false }, 
-		{ glm::vec2(100.f,	 0.f),	glm::vec2(1.f, 0.f), false }, 
-		{ glm::vec2(0.f,   100.f),	glm::vec2(0.f, 1.f), false }, 
-		{ glm::vec2(100.f, 100.f),	glm::vec2(1.f, 1.f), false }
-	};
-
-	Primitives::draw_triangle(texture_pivots[0], texture_pivots[1], texture_pivots[2], m_texture);
-	Primitives::draw_triangle(texture_pivots[1], texture_pivots[2], texture_pivots[3], m_texture);
+	if (m_texture.loaded) {
+		const glm::vec2 & size = glm::vec2(100, 100);
+		Vertex texture_pivots[4] = {
+			{ glm::vec2(0.f,	   0.f),	glm::vec2(0.f, 0.f), false }, 
+			{ glm::vec2(size.x,	   0.f),	glm::vec2(1.f, 0.f), false }, 
+			{ glm::vec2(0.f,    size.y),	glm::vec2(0.f, 1.f), false }, 
+			{ glm::vec2(size.x, size.y),	glm::vec2(1.f, 1.f), false }
+		};
+		Primitives::draw_triangle(texture_pivots[0], texture_pivots[1], texture_pivots[2], m_texture.name);
+		Primitives::draw_triangle(texture_pivots[1], texture_pivots[2], texture_pivots[3], m_texture.name);
+	}
 
 	Primitives::draw_ruler();
-
+	
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
 		Primitives::draw_pivot(vertexes[i].texture_uv * texture_uv_scale, vertexes[i].locked ? Color::Green : Color::Blue);
 	}
@@ -303,7 +287,7 @@ void Window::render_texture() {
 
 void Window::render_geometry() {
 	Editor & editor = editors[Geometry];
-	SDL_GL_MakeCurrent(editor.window, m_context);
+	SDL_GL_MakeCurrent(editor.window, context);
 
 	int width, height;
 	SDL_GL_GetDrawableSize(editor.window, &width, &height);
@@ -318,14 +302,27 @@ void Window::render_geometry() {
 	glMatrixMode(GL_MODELVIEW);
 	glLoadMatrixf(glm::value_ptr(view));
 
-	for (unsigned int i = 0; i < triangles.size(); i++) {
-		Triangle & tri = triangles[i];
-		Vertex & p0 = vertexes[tri.indexes[0]];
-		Vertex & p1 = vertexes[tri.indexes[1]];
-		Vertex & p2 = vertexes[tri.indexes[2]];
-		Primitives::draw_triangle(p0, p1, p2, m_texture);
+	if (m_background.loaded) {
+		const glm::vec2 & offset = m_background_offset;
+		Vertex background_pivots[4] = {
+			{ glm::vec2(offset.x,						offset.y),							glm::vec2(0.f, 0.f), false }, 
+			{ glm::vec2(offset.x + m_background.size.x,	offset.y),							glm::vec2(1.f, 0.f), false }, 
+			{ glm::vec2(offset.x,						offset.y + m_background.size.y),	glm::vec2(0.f, 1.f), false }, 
+			{ glm::vec2(offset.x + m_background.size.x, offset.y + m_background.size.y),	glm::vec2(1.f, 1.f), false }
+		};
+		Primitives::draw_triangle(background_pivots[0], background_pivots[1], background_pivots[2], m_background.name);
+		Primitives::draw_triangle(background_pivots[1], background_pivots[2], background_pivots[3], m_background.name);
 	}
 
+	if (m_texture.loaded) {
+		for (unsigned int i = 0; i < triangles.size(); i++) {
+			Triangle & tri = triangles[i];
+			Vertex & p0 = vertexes[tri.indexes[0]];
+			Vertex & p1 = vertexes[tri.indexes[1]];
+			Vertex & p2 = vertexes[tri.indexes[2]];
+			Primitives::draw_triangle(p0, p1, p2, m_texture.name);
+		}	
+	} 
 	Primitives::draw_ruler();
 
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
@@ -353,7 +350,7 @@ void Window::render_geometry() {
 
 void Window::render_timeline() {
 	Editor & editor = editors[Timeline];
-	SDL_GL_MakeCurrent(editor.window, m_context);
+	SDL_GL_MakeCurrent(editor.window, context);
 
 	int width, height;
 	SDL_GL_GetDrawableSize(editor.window, &width, &height);
@@ -371,18 +368,17 @@ void Window::render_timeline() {
 	SDL_GL_SwapWindow(editor.window);
 }
 
-void Window::load_texture(const std::string & path) {
+void Window::load_texture(const std::string & path, Image & image) {
 
 	glActiveTexture(GL_TEXTURE0);
-	glDeleteTextures(1, &m_texture);
-	glBindTexture(GL_TEXTURE_2D, m_texture);
+	glBindTexture(GL_TEXTURE_2D, image.name);
 
 	int width, height, channels;
 	unsigned char* ptr = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
 
     if (ptr && width && height) {
-		glGenTextures(1, &m_texture);
-		glBindTexture(GL_TEXTURE_2D, m_texture);
+		image.loaded = true;
+		image.size = glm::vec2(width, height);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, ptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);

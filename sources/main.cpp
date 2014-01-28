@@ -23,29 +23,35 @@ int main(int agrc, char * argv[]) {
 
 	SDL_GL_SetSwapInterval(1);
 
-	SDL_Window * g_window = SDL_CreateWindow(g_title, g_w_x, g_w_y, window_size, window_size, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-	if (g_window == NULL) {
-		std::cout << "failed to create window" << std::endl;
-		return 0;
+	Window editor;
+
+	Editor geometry_editor;
+	{
+		geometry_editor.type = Geometry;
+		geometry_editor.window = SDL_CreateWindow(g_title, g_w_x, g_w_y, window_size, window_size, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+		geometry_editor.editor_transform.scale		= default_scale * 4;
+		geometry_editor.editor_transform.position	= glm::vec2(55, 55);
+		editor.editors[Geometry] = geometry_editor;
 	}
 
-	SDL_Window * t_window = SDL_CreateWindow(t_title, t_w_x, t_w_y, window_size, window_size, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
-	if (t_window == NULL) {
-		std::cout << "failed to create window" << std::endl;
-		return 0;
+	Editor texture_editor;
+	{
+		texture_editor.type = Texture;
+		texture_editor.window = SDL_CreateWindow(t_title, t_w_x, t_w_y, window_size, window_size, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+		texture_editor.editor_transform.scale		= default_scale * 4;
+		texture_editor.editor_transform.position	= glm::vec2(55, 55);
+		editor.editors[Texture]  = texture_editor;
 	}
 
-	SDL_Window * a_window = SDL_CreateWindow(a_title, a_w_x, a_w_y, window_size * 2 + space, 50, SDL_WINDOW_OPENGL);
-	if (a_window == NULL) {
-		std::cout << "failed to create window" << std::endl;
-		return 0;
+	Editor timeline;
+	{
+		timeline.type = Timeline;
+		timeline.window = SDL_CreateWindow(a_title, a_w_x, a_w_y, window_size * 2 + space, 50, SDL_WINDOW_OPENGL);
+		timeline.editor_transform.scale = 1;
+		editor.editors[Timeline]  = timeline;
 	}
 
-	SDL_GLContext context = SDL_GL_CreateContext(g_window);
-	if (context == NULL) {
-		std::cout << "failed to create GL context" << std::endl;
-		return 0;
-	}
+	editor.context = SDL_GL_CreateContext(editor.editors[Geometry].window);
 
 	if (glewInit() != GLEW_OK) {
 		std::cout << "failed to init glew" << std::endl;
@@ -55,12 +61,12 @@ int main(int agrc, char * argv[]) {
 	SDL_GL_SetSwapInterval(1);
 	glClearColor(.7f, .7f, .7f, 1.f);
 
-	Window editor(g_window, t_window, a_window, context);
 	editor.work();
 
-	SDL_GL_DeleteContext(context);
-	SDL_DestroyWindow(g_window);
-	SDL_DestroyWindow(t_window);
+	SDL_GL_DeleteContext(editor.context);
+	SDL_DestroyWindow(editor.editors[Geometry].window);
+	SDL_DestroyWindow(editor.editors[Texture].window);
+	SDL_DestroyWindow(editor.editors[Timeline].window);
 	SDL_Quit();
 	return 0;
 }

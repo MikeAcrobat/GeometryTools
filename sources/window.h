@@ -1,6 +1,9 @@
 #ifndef ___window___
 #define ___window___
 
+const float default_scale = 10.f;
+const glm::vec2 texture_uv_scale = glm::vec2(100, 100);
+
 enum EditorType {
 	Geometry,
 	Texture,
@@ -31,6 +34,10 @@ struct Editor {
 	SDL_Window *			window;
 	EditorType				type;
 
+	Editor() {
+		window = nullptr;
+	}
+
 	glm::mat4 view_matrix();
 	glm::vec2 mouse_global_to_local(float mouse_x, float mouse_y);
 };
@@ -41,11 +48,17 @@ struct GeomState {
 };
 
 class Window {
-	
-	SDL_GLContext			m_context;
-
 	std::string				m_xml_animation_path;
-	GLuint					m_texture;
+
+	struct Image {
+		glm::vec2	size;
+		GLuint		name;
+		bool		loaded;
+	};
+	Image					m_texture;
+	Image					m_background;
+	bool					m_background_edit;
+	glm::vec2				m_background_offset;
 
 	bool					wheel_lock;
 	bool					mouse_down;
@@ -57,8 +70,6 @@ class Window {
 	bool					multiple_selection_init;
 	glm::vec2				start_selection, end_selection;
 	
-	Editor					editors[EditorTypeCount];
-
 	std::vector<Vertex>		vertexes;
 	std::vector<Triangle>	triangles;
 
@@ -66,7 +77,11 @@ class Window {
 
 	Editor * get_editor(Uint32 windowID);
 public:
-	Window(SDL_Window * geometry_window, SDL_Window * texture_window, SDL_Window * timeline_window, SDL_GLContext mainContext);
+
+	Editor editors[EditorTypeCount];
+	SDL_GLContext context;
+
+	Window();
 	void work();
 	bool handle_events();
 
@@ -74,7 +89,7 @@ public:
 	void render_geometry();
 	void render_timeline();
 
-	void load_texture(const std::string & path);
+	void load_texture(const std::string & path, Image & image);
 
 	bool hit_test(EditorType type, glm::vec2 mouse);
 	int  select_vertex(EditorType type, glm::vec2 mouse, bool add);
