@@ -16,11 +16,11 @@ public:
 
 class Primitives {
 public:
-	static void draw_ruler();
-	static void draw_pivot(glm::vec2 position, Color color);
+	static void draw_ruler(glm::vec2 size);
+	static void draw_pivot(glm::vec2 position, Color color, float scale);
 
-	static void draw_line(glm::vec2 p1, glm::vec2 p2, Color color1, Color color2);
-	static void draw_triangle(Vertex p1, Vertex p2, Vertex p3, GLuint texture);
+	static void draw_line(glm::vec2 p1, glm::vec2 p2, glm::vec2 scale, Color color1, Color color2);
+	static void draw_triangle(Vertex p1, Vertex p2, Vertex p3, GLuint texture, glm::vec2 scale, float opacity);
 	static void draw_rect(glm::vec2 p1, glm::vec2 p2, Color color);
 };
 

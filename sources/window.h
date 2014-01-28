@@ -2,7 +2,6 @@
 #define ___window___
 
 const float default_scale = 10.f;
-const glm::vec2 texture_uv_scale = glm::vec2(100, 100);
 
 enum EditorType {
 	Geometry,

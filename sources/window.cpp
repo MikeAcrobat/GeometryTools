@@ -2,6 +2,8 @@
 #include "window.h"
 #include "stbi_image.h"
 
+glm::vec2 uv_scale = glm::vec2(100, 100);
+
 bool Triangle::compare(int index1, int index2, int index3) {
 	bool cmp1 = indexes[0] == index1 || indexes[1] == index1 || indexes[2] == index1;
 	bool cmp2 = indexes[0] == index2 || indexes[1] == index2 || indexes[2] == index2;
@@ -40,29 +42,13 @@ Editor * Window::get_editor(Uint32 windowID) {
 }
 
 Window::Window() {
-	/*
-	add_vertex( glm::vec2(0.f, 0.f) );
-	add_vertex( glm::vec2(100.f, 0.f) );
-	add_vertex( glm::vec2(0.f, 100.f) );
-	add_vertex( glm::vec2(100.f, 100.f) );
-	{
-		Triangle t;
-		t.indexes[0] = 0;	t.indexes[1] = 1;	t.indexes[2] = 2;
-		triangles.push_back(t);
-	}
-	{
-		Triangle t;
-		t.indexes[0] = 1;	t.indexes[1] = 2;	t.indexes[2] = 3;
-		triangles.push_back(t);
-	}
-	state_stack.clear();
-	*/
 	wheel_lock = false;
 	mouse_down = false;
 	moving_geometry = false;
 	multiple_selection = false;
 	multiple_selection_init = false;
 	m_background.loaded = m_texture.loaded = false;
+	m_background.size = m_texture.size = glm::vec2(100, 100);
 	m_background_edit = false;
 }
 
@@ -97,7 +83,17 @@ bool Window::handle_events() {
 				m_xml_animation_path = filepath;
 				load_geometry();
 			} else {
-				load_texture(filepath, m_background_edit ? m_background : m_texture);
+				if (m_background_edit) {
+					load_texture(filepath, m_background);
+				} else {
+					load_texture(filepath, m_texture);
+					float scale_x = m_texture.size.x / 100.f;
+					float scale_y = m_texture.size.y / 100.f;
+					float scale = std::max(scale_x, scale_y);
+					scale_x /= scale;	scale_y /= scale;
+					uv_scale.x = 100.f * scale_x;
+					uv_scale.y = 100.f * scale_y;
+				}
 			}
 		}
 
@@ -209,6 +205,7 @@ bool Window::handle_events() {
 
 		if (event.type == SDL_KEYDOWN) {
 			if (event.key.keysym.scancode == SDL_SCANCODE_R)		reset_views();
+			if (event.key.keysym.scancode == SDL_SCANCODE_T)		m_background_offset = glm::vec2();
 			if (event.key.keysym.scancode == SDL_SCANCODE_UP)		move_editor( 0,	-1 );
 			if (event.key.keysym.scancode == SDL_SCANCODE_LEFT)		move_editor(-1,	 0 );
 			if (event.key.keysym.scancode == SDL_SCANCODE_RIGHT)	move_editor( 1,	 0 );
@@ -249,21 +246,21 @@ void Window::render_texture() {
 	glLoadMatrixf(glm::value_ptr(view));
 
 	if (m_texture.loaded) {
-		const glm::vec2 & size = glm::vec2(100, 100);
+		const glm::vec2 & size = uv_scale;
 		Vertex texture_pivots[4] = {
-			{ glm::vec2(0.f,	   0.f),	glm::vec2(0.f, 0.f), false }, 
-			{ glm::vec2(size.x,	   0.f),	glm::vec2(1.f, 0.f), false }, 
-			{ glm::vec2(0.f,    size.y),	glm::vec2(0.f, 1.f), false }, 
-			{ glm::vec2(size.x, size.y),	glm::vec2(1.f, 1.f), false }
+			{ glm::vec2(0.f, 0.f), glm::vec2(0.f, 0.f), false }, 
+			{ glm::vec2(1.f, 0.f), glm::vec2(1.f, 0.f), false }, 
+			{ glm::vec2(0.f, 1.f), glm::vec2(0.f, 1.f), false }, 
+			{ glm::vec2(1.f, 1.f), glm::vec2(1.f, 1.f), false }
 		};
-		Primitives::draw_triangle(texture_pivots[0], texture_pivots[1], texture_pivots[2], m_texture.name);
-		Primitives::draw_triangle(texture_pivots[1], texture_pivots[2], texture_pivots[3], m_texture.name);
+		Primitives::draw_triangle(texture_pivots[0], texture_pivots[1], texture_pivots[2], m_texture.name, size, 1.f);
+		Primitives::draw_triangle(texture_pivots[1], texture_pivots[2], texture_pivots[3], m_texture.name, size, 1.f);
 	}
 
-	Primitives::draw_ruler();
+	Primitives::draw_ruler(uv_scale);
 	
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Primitives::draw_pivot(vertexes[i].texture_uv * texture_uv_scale, vertexes[i].locked ? Color::Green : Color::Blue);
+		Primitives::draw_pivot(vertexes[i].texture_uv * uv_scale, vertexes[i].locked ? Color::Green : Color::Blue, editor.editor_transform.scale);
 	}
 
 	for (unsigned int i = 0; i < triangles.size(); i++) {
@@ -271,9 +268,9 @@ void Window::render_texture() {
 		Vertex & p0 = vertexes[tri.indexes[0]];
 		Vertex & p1 = vertexes[tri.indexes[1]];
 		Vertex & p2 = vertexes[tri.indexes[2]];
-		Primitives::draw_line(p0.texture_uv * texture_uv_scale, p1.texture_uv * texture_uv_scale, p0.locked ? Color::Green : Color::Blue, p1.locked ? Color::Green : Color::Blue);
-		Primitives::draw_line(p1.texture_uv * texture_uv_scale, p2.texture_uv * texture_uv_scale, p1.locked ? Color::Green : Color::Blue, p2.locked ? Color::Green : Color::Blue);
-		Primitives::draw_line(p2.texture_uv * texture_uv_scale, p0.texture_uv * texture_uv_scale, p2.locked ? Color::Green : Color::Blue, p0.locked ? Color::Green : Color::Blue);
+		Primitives::draw_line(p0.texture_uv, p1.texture_uv, uv_scale, p0.locked ? Color::Green : Color::Blue, p1.locked ? Color::Green : Color::Blue);
+		Primitives::draw_line(p1.texture_uv, p2.texture_uv, uv_scale, p1.locked ? Color::Green : Color::Blue, p2.locked ? Color::Green : Color::Blue);
+		Primitives::draw_line(p2.texture_uv, p0.texture_uv, uv_scale, p2.locked ? Color::Green : Color::Blue, p0.locked ? Color::Green : Color::Blue);
 	}
 
 	if (multiple_selection && selection_editor == Texture) {
@@ -303,30 +300,41 @@ void Window::render_geometry() {
 	glLoadMatrixf(glm::value_ptr(view));
 
 	if (m_background.loaded) {
-		const glm::vec2 & offset = m_background_offset;
+		const glm::vec2 & offset = m_background_offset / uv_scale;
+		const glm::vec2 & size = m_background.size / m_texture.size;
 		Vertex background_pivots[4] = {
-			{ glm::vec2(offset.x,						offset.y),							glm::vec2(0.f, 0.f), false }, 
-			{ glm::vec2(offset.x + m_background.size.x,	offset.y),							glm::vec2(1.f, 0.f), false }, 
-			{ glm::vec2(offset.x,						offset.y + m_background.size.y),	glm::vec2(0.f, 1.f), false }, 
-			{ glm::vec2(offset.x + m_background.size.x, offset.y + m_background.size.y),	glm::vec2(1.f, 1.f), false }
+			{ glm::vec2(offset.x,			offset.y),			glm::vec2(0.f, 0.f), false }, 
+			{ glm::vec2(offset.x + size.x,	offset.y),			glm::vec2(1.f, 0.f), false }, 
+			{ glm::vec2(offset.x,			offset.y + size.y),	glm::vec2(0.f, 1.f), false }, 
+			{ glm::vec2(offset.x + size.x,  offset.y + size.y),	glm::vec2(1.f, 1.f), false }
 		};
-		Primitives::draw_triangle(background_pivots[0], background_pivots[1], background_pivots[2], m_background.name);
-		Primitives::draw_triangle(background_pivots[1], background_pivots[2], background_pivots[3], m_background.name);
+		Primitives::draw_triangle(background_pivots[0], background_pivots[1], background_pivots[2], m_background.name, uv_scale, 1.f);
+		Primitives::draw_triangle(background_pivots[1], background_pivots[2], background_pivots[3], m_background.name, uv_scale, 1.f);
 	}
 
 	if (m_texture.loaded) {
+		const glm::vec2 & size = uv_scale;
+		Vertex texture_pivots[4] = {
+			{ glm::vec2(0.f, 0.f), glm::vec2(0.f, 0.f), false }, 
+			{ glm::vec2(1.f, 0.f), glm::vec2(1.f, 0.f), false }, 
+			{ glm::vec2(0.f, 1.f), glm::vec2(0.f, 1.f), false }, 
+			{ glm::vec2(1.f, 1.f), glm::vec2(1.f, 1.f), false }
+		};
+		Primitives::draw_triangle(texture_pivots[0], texture_pivots[1], texture_pivots[2], m_texture.name, size, .3f);
+		Primitives::draw_triangle(texture_pivots[1], texture_pivots[2], texture_pivots[3], m_texture.name, size, .3f);
+
 		for (unsigned int i = 0; i < triangles.size(); i++) {
 			Triangle & tri = triangles[i];
 			Vertex & p0 = vertexes[tri.indexes[0]];
 			Vertex & p1 = vertexes[tri.indexes[1]];
 			Vertex & p2 = vertexes[tri.indexes[2]];
-			Primitives::draw_triangle(p0, p1, p2, m_texture.name);
+			Primitives::draw_triangle(p0, p1, p2, m_texture.name, size, 1.f);
 		}	
 	} 
-	Primitives::draw_ruler();
+	Primitives::draw_ruler(uv_scale);
 
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Primitives::draw_pivot(vertexes[i].position, vertexes[i].locked ? Color::Green : Color::Blue);
+		Primitives::draw_pivot(vertexes[i].position * uv_scale, vertexes[i].locked ? Color::Green : Color::Blue, editor.editor_transform.scale);
 	}
 
 	for (unsigned int i = 0; i < triangles.size(); i++) {
@@ -334,9 +342,9 @@ void Window::render_geometry() {
 		Vertex & p0 = vertexes[tri.indexes[0]];
 		Vertex & p1 = vertexes[tri.indexes[1]];
 		Vertex & p2 = vertexes[tri.indexes[2]];
-		Primitives::draw_line(p0.position, p1.position, p0.locked ? Color::Green : Color::Blue, p1.locked ? Color::Green : Color::Blue);
-		Primitives::draw_line(p1.position, p2.position, p1.locked ? Color::Green : Color::Blue, p2.locked ? Color::Green : Color::Blue);
-		Primitives::draw_line(p2.position, p0.position, p2.locked ? Color::Green : Color::Blue, p0.locked ? Color::Green : Color::Blue);
+		Primitives::draw_line(p0.position, p1.position, uv_scale, p0.locked ? Color::Green : Color::Blue, p1.locked ? Color::Green : Color::Blue);
+		Primitives::draw_line(p1.position, p2.position, uv_scale, p1.locked ? Color::Green : Color::Blue, p2.locked ? Color::Green : Color::Blue);
+		Primitives::draw_line(p2.position, p0.position, uv_scale, p2.locked ? Color::Green : Color::Blue, p0.locked ? Color::Green : Color::Blue);
 	}
 
 	if (multiple_selection && selection_editor == Geometry) {
@@ -395,8 +403,8 @@ bool Window::hit_test(EditorType type, glm::vec2 mouse) {
 	mouse = editor.mouse_global_to_local(mouse.x, mouse.y);
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
 		Vertex & vertex = vertexes[i];
-		if (type == Geometry && glm::length(vertex.position - mouse) < 2.f) return true;;
-		if (type == Texture && glm::length(vertex.texture_uv * texture_uv_scale - mouse) < 2.f) return true;
+		if (type == Geometry && glm::length(vertex.position * uv_scale - mouse) < 2.f) return true;;
+		if (type == Texture && glm::length(vertex.texture_uv * uv_scale - mouse) < 2.f) return true;
 	}
 	return false;
 }
@@ -412,8 +420,8 @@ int Window::select_vertex(EditorType type, glm::vec2 mouse, bool add) {
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
 		Vertex & vertex = vertexes[i];
 		bool pick = false;
-		pick = pick || type == Geometry && glm::length(vertex.position - mouse) < 2.f;
-		pick = pick || type == Texture && glm::length(vertex.texture_uv * texture_uv_scale - mouse) < 2.f;
+		pick = pick || type == Geometry && glm::length(vertex.position * uv_scale - mouse) < 2.f;
+		pick = pick || type == Texture && glm::length(vertex.texture_uv * uv_scale - mouse) < 2.f;
 		bool prev_lock = vertex.locked;
 		bool next_lock = add ? (pick ? !vertex.locked : vertex.locked) : pick;
 		vertex.locked = next_lock;
@@ -438,8 +446,8 @@ void Window::select_vertex_range(EditorType type, glm::vec2 start, glm::vec2 end
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
 		Vertex & vertex = vertexes[i];
 		bool pick = false;
-		pick = pick || (type == Geometry && INSIDE(vertex.position, start, end));
-		pick = pick || (type == Texture	&& INSIDE((vertex.texture_uv * texture_uv_scale), start, end));
+		pick = pick || (type == Geometry && INSIDE((vertex.position * uv_scale), start, end));
+		pick = pick || (type == Texture	&& INSIDE((vertex.texture_uv * uv_scale), start, end));
 		bool prev_lock = vertex.locked;
 		bool next_lock = add ? (pick ? !vertex.locked : vertex.locked) : pick;
 		vertex.locked = next_lock;
@@ -454,8 +462,7 @@ void Window::add_vertex(glm::vec2 position) {
 	push_state();
 
 	Vertex v;
-	v.position = position;
-	v.texture_uv = position / texture_uv_scale;
+	v.position = v.texture_uv = position / uv_scale;
 	v.locked = true;
 	vertexes.push_back(v);
 }
@@ -549,7 +556,7 @@ void Window::move_selected_vertexes(EditorType type, glm::vec2 vector) {
 		Vertex & vertex = vertexes[i];
 		if (vertex.locked) {
 			if (type == Geometry)	vertex.position += vector;
-			if (type == Texture)	vertex.texture_uv += vector / texture_uv_scale;
+			if (type == Texture)	vertex.texture_uv += vector / uv_scale;
 		}
 	}
 }
