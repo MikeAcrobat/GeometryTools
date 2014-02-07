@@ -2,7 +2,59 @@
 #include "window.h"
 #include "stbi_image.h"
 
-glm::vec2 uv_scale = glm::vec2(100, 100);
+glm::vec2 ed_scale = glm::vec2(100, 100);
+
+unsigned int frame_count = 50;
+
+bool compare(const Vertex & v1, const Vertex & v2) {
+	return v1.time < v2.time;
+}
+
+glm::vec2 MeshVertex::get_pos(float time) {
+	if (vertexes.empty()) return glm::vec2();
+	if (vertexes.size() == 1) return vertexes[0].position;
+	for (unsigned int i = 1; i < vertexes.size(); i++) {
+		Vertex & v1 = vertexes[i - 1];
+		Vertex & v2 = vertexes[i];
+		if (v1.time <= time && time <= v2.time) {
+			float dt = (time - v1.time) / (v2.time - v1.time);
+			return v1.position + (v2.position - v1.position) * dt;
+		}
+	}
+	return vertexes.back().position;
+}
+
+glm::vec2 MeshVertex::get_uv(float time) {
+	if (vertexes.empty()) return glm::vec2();
+	if (vertexes.size() == 1) return vertexes[0].texture_uv;
+	for (unsigned int i = 1; i < vertexes.size(); i++) {
+		Vertex & v1 = vertexes[i - 1];
+		Vertex & v2 = vertexes[i];
+		if (v1.time <= time && time <= v2.time) {
+			float dt = (time - v1.time) / (v2.time - v1.time);
+			return v1.texture_uv + (v2.texture_uv - v1.texture_uv) * dt;
+		}
+	}
+	return vertexes.back().texture_uv;
+}
+
+Vertex & MeshVertex::vertex(float time) {
+	for (unsigned int i = 0; i < vertexes.size(); i++) {
+		Vertex & v = vertexes[i];
+		if (std::abs(v.time - time) <= (1.f / (float)frame_count)) return v;
+	}
+	time = int(time * frame_count) / float(frame_count);
+	Vertex v;
+	v.position = get_pos(time);		v.texture_uv = get_uv(time);	
+	v.time = time;
+	vertexes.push_back(v);			
+	sort();
+	return vertex(time);
+}
+
+void MeshVertex::sort() {
+	std::sort(vertexes.begin(), vertexes.end(), compare);
+}
 
 bool Triangle::compare(int index1, int index2, int index3) {
 	bool cmp1 = indexes[0] == index1 || indexes[1] == index1 || indexes[2] == index1;
@@ -50,6 +102,9 @@ Window::Window() {
 	m_background.loaded = m_texture.loaded = false;
 	m_background.size = m_texture.size = glm::vec2(100, 100);
 	m_background_edit = false;
+	m_time = 0.f;
+	m_play = false;
+	m_show_trace = m_show_pivots = false;
 }
 
 void Window::work() {
@@ -60,6 +115,17 @@ void Window::work() {
 	glGenTextures(1, &m_background.name);
 
 	while (handle_events()) {
+
+		static unsigned int last_time = SDL_GetTicks();
+		unsigned int current_time = SDL_GetTicks();
+		float dt = (current_time - last_time) / 1000.f;
+		last_time = current_time;
+
+		if (m_play) {
+			m_time += dt;
+			if (m_time >= 1.f) m_time -= 1.f;
+		}
+
 		render_geometry();
 		render_texture();
 		render_timeline();
@@ -72,6 +138,7 @@ bool Window::handle_events() {
 	const Uint8 * keystate = SDL_GetKeyboardState(NULL);
 
 	while (SDL_PollEvent(&event)) {
+
 		if (event.type == SDL_WINDOWEVENT && event.window.event == SDL_WINDOWEVENT_CLOSE) return false;
 		if (event.type == SDL_WINDOWEVENT && (event.window.event == SDL_WINDOWEVENT_ENTER || event.window.event == SDL_WINDOWEVENT_LEAVE)) {
 			wheel_lock = mouse_down = moving_geometry = multiple_selection = multiple_selection_init = false;
@@ -91,8 +158,8 @@ bool Window::handle_events() {
 					float scale_y = m_texture.size.y / 100.f;
 					float scale = std::max(scale_x, scale_y);
 					scale_x /= scale;	scale_y /= scale;
-					uv_scale.x = 100.f * scale_x;
-					uv_scale.y = 100.f * scale_y;
+					ed_scale.x = 100.f * scale_x;
+					ed_scale.y = 100.f * scale_y;
 				}
 			}
 		}
@@ -139,14 +206,18 @@ bool Window::handle_events() {
 		if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
 			Editor * editor = get_editor(event.button.windowID);
 			if (editor) {
+				mouse_down = true;
 				if (editor->type == Geometry || editor->type == Texture) {
-					mouse_down = true;
 					end_selection = start_selection = glm::vec2(event.button.x, event.button.y);
 					if (!hit_test(editor->type, glm::vec2(event.button.x, event.button.y))) {
 						multiple_selection_init = true;
 						selection_editor = editor->type;
 						addictive_selection = keystate[SDL_SCANCODE_LSHIFT] != 0;
 					}
+				} else {
+					int w, h;
+					SDL_GL_GetDrawableSize(editor->window, &w, &h);
+					m_time = (float)event.motion.x * (frame_count + 1) / (float)w / (float)frame_count;
 				}
 			}
 		}
@@ -171,6 +242,10 @@ bool Window::handle_events() {
 							push_state();
 						}
 					}
+				} else {
+					int w, h;
+					SDL_GL_GetDrawableSize(editor->window, &w, &h);
+					m_time = (float)event.motion.x * (frame_count + 1) / (float)w / (float)frame_count;
 				}
 			}
 		}
@@ -179,8 +254,8 @@ bool Window::handle_events() {
 		if (event.type == SDL_MOUSEBUTTONUP && event.button.button == SDL_BUTTON_LEFT) {
 			Editor * editor = get_editor(event.button.windowID);
 			if (editor) {
+				mouse_down = false;
 				if (editor->type == Geometry || editor->type == Texture) {
-					mouse_down = false;
 					if (moving_geometry) {
 						moving_geometry = false;
 					} else {				
@@ -193,6 +268,10 @@ bool Window::handle_events() {
 							select_vertex(editor->type, glm::vec2(event.button.x, event.button.y), keystate[SDL_SCANCODE_LSHIFT] != 0);
 						}
 					} 
+				} else {
+					int w, h;
+					SDL_GL_GetDrawableSize(editor->window, &w, &h);
+					m_time = (float)event.motion.x * (frame_count + 1) / (float)w / (float)frame_count;
 				}
 			}
 		}
@@ -221,8 +300,13 @@ bool Window::handle_events() {
 			}
 			if (event.key.keysym.scancode == SDL_SCANCODE_TAB) {
 				m_background_edit = !m_background_edit;
-				SDL_SetWindowTitle(editors[Geometry].window, m_background_edit ? "Background Edit" : "Geometry");
+				SDL_SetWindowTitle(editors[Geometry].window, m_background_edit ? "Background Edit" : "Geometry Edit");
 			}
+			if (event.key.keysym.scancode == SDL_SCANCODE_SPACE)	m_play = !m_play;
+			if (event.key.keysym.scancode == SDL_SCANCODE_HOME)		m_time = 0;
+			if (event.key.keysym.scancode == SDL_SCANCODE_END)		m_time = 1;
+			if (event.key.keysym.scancode == SDL_SCANCODE_H)		m_show_trace = !m_show_trace;
+			if (event.key.keysym.scancode == SDL_SCANCODE_J)		m_show_pivots = !m_show_pivots;
 		}
 	}
 	return true;
@@ -246,31 +330,58 @@ void Window::render_texture() {
 	glLoadMatrixf(glm::value_ptr(view));
 
 	if (m_texture.loaded) {
-		const glm::vec2 & size = uv_scale;
-		Vertex texture_pivots[4] = {
-			{ glm::vec2(0.f, 0.f), glm::vec2(0.f, 0.f), false }, 
-			{ glm::vec2(1.f, 0.f), glm::vec2(1.f, 0.f), false }, 
-			{ glm::vec2(0.f, 1.f), glm::vec2(0.f, 1.f), false }, 
-			{ glm::vec2(1.f, 1.f), glm::vec2(1.f, 1.f), false }
+		const glm::vec2 & size = ed_scale;
+		glm::vec2 v[8] = {
+			glm::vec2(0.f, 0.f), glm::vec2(0.f, 0.f), 
+			glm::vec2(1.f, 0.f), glm::vec2(1.f, 0.f), 
+			glm::vec2(0.f, 1.f), glm::vec2(0.f, 1.f), 
+			glm::vec2(1.f, 1.f), glm::vec2(1.f, 1.f),
 		};
-		Primitives::draw_triangle(texture_pivots[0], texture_pivots[1], texture_pivots[2], m_texture.name, size, 1.f);
-		Primitives::draw_triangle(texture_pivots[1], texture_pivots[2], texture_pivots[3], m_texture.name, size, 1.f);
+		Primitives::draw_triangle(v[0], v[1], v[2], v[3], v[4], v[5], m_texture.name, size, 1.f);
+		Primitives::draw_triangle(v[2], v[3], v[4], v[5], v[6], v[7], m_texture.name, size, 1.f);
 	}
 
-	Primitives::draw_ruler(uv_scale);
+	Primitives::draw_ruler(ed_scale);
 	
+	if (m_show_pivots) {
+		for (int t = 0; t != 10; t++) {
+			float time = t / 9.f;
+			for (unsigned int i = 0; i < vertexes.size(); i++) {
+				MeshVertex & vertes = vertexes[i];
+				if (vertes.locked) {
+					Primitives::draw_pivot(vertes.get_uv(time) * ed_scale, Color::Grey, editor.editor_transform.scale);
+				}
+			}
+		}
+	}
+
+	if (m_show_trace) {
+		for (int t = 0; t != 10; t++) {
+			float time = t / 9.f;
+			for (unsigned int i = 0; i < triangles.size(); i++) {
+				Triangle & tri = triangles[i];
+				MeshVertex & p0 = vertexes[tri.indexes[0]];	glm::vec2 uv0_pos = p0.get_uv(time);
+				MeshVertex & p1 = vertexes[tri.indexes[1]]; glm::vec2 uv1_pos = p1.get_uv(time);
+				MeshVertex & p2 = vertexes[tri.indexes[2]]; glm::vec2 uv2_pos = p2.get_uv(time);
+				Primitives::draw_line(uv0_pos, uv1_pos, ed_scale, Color::Grey, Color::Grey, 1.f);
+				Primitives::draw_line(uv1_pos, uv2_pos, ed_scale, Color::Grey, Color::Grey, 1.f);
+				Primitives::draw_line(uv2_pos, uv0_pos, ed_scale, Color::Grey, Color::Grey, 1.f);
+			}
+		}
+	}
+
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Primitives::draw_pivot(vertexes[i].texture_uv * uv_scale, vertexes[i].locked ? Color::Green : Color::Blue, editor.editor_transform.scale);
+		Primitives::draw_pivot(vertexes[i].get_uv(m_time) * ed_scale, vertexes[i].locked ? Color::Green : Color::Blue, editor.editor_transform.scale);
 	}
 
 	for (unsigned int i = 0; i < triangles.size(); i++) {
 		Triangle & tri = triangles[i];
-		Vertex & p0 = vertexes[tri.indexes[0]];
-		Vertex & p1 = vertexes[tri.indexes[1]];
-		Vertex & p2 = vertexes[tri.indexes[2]];
-		Primitives::draw_line(p0.texture_uv, p1.texture_uv, uv_scale, p0.locked ? Color::Green : Color::Blue, p1.locked ? Color::Green : Color::Blue);
-		Primitives::draw_line(p1.texture_uv, p2.texture_uv, uv_scale, p1.locked ? Color::Green : Color::Blue, p2.locked ? Color::Green : Color::Blue);
-		Primitives::draw_line(p2.texture_uv, p0.texture_uv, uv_scale, p2.locked ? Color::Green : Color::Blue, p0.locked ? Color::Green : Color::Blue);
+		MeshVertex & p0 = vertexes[tri.indexes[0]];	glm::vec2 p0_uv = p0.get_uv(m_time);
+		MeshVertex & p1 = vertexes[tri.indexes[1]];	glm::vec2 p1_uv = p1.get_uv(m_time);
+		MeshVertex & p2 = vertexes[tri.indexes[2]];	glm::vec2 p2_uv = p2.get_uv(m_time);
+		Primitives::draw_line(p0_uv, p1_uv, ed_scale, p0.locked ? Color::Green : Color::Blue, p1.locked ? Color::Green : Color::Blue, 1.f);
+		Primitives::draw_line(p1_uv, p2_uv, ed_scale, p1.locked ? Color::Green : Color::Blue, p2.locked ? Color::Green : Color::Blue, 1.f);
+		Primitives::draw_line(p2_uv, p0_uv, ed_scale, p2.locked ? Color::Green : Color::Blue, p0.locked ? Color::Green : Color::Blue, 1.f);
 	}
 
 	if (multiple_selection && selection_editor == Texture) {
@@ -300,51 +411,78 @@ void Window::render_geometry() {
 	glLoadMatrixf(glm::value_ptr(view));
 
 	if (m_background.loaded) {
-		const glm::vec2 & offset = m_background_offset / uv_scale;
+		const glm::vec2 & offset = m_background_offset / ed_scale;
 		const glm::vec2 & size = m_background.size / m_texture.size;
-		Vertex background_pivots[4] = {
-			{ glm::vec2(offset.x,			offset.y),			glm::vec2(0.f, 0.f), false }, 
-			{ glm::vec2(offset.x + size.x,	offset.y),			glm::vec2(1.f, 0.f), false }, 
-			{ glm::vec2(offset.x,			offset.y + size.y),	glm::vec2(0.f, 1.f), false }, 
-			{ glm::vec2(offset.x + size.x,  offset.y + size.y),	glm::vec2(1.f, 1.f), false }
+		glm::vec2 v[8] = {
+			glm::vec2(offset.x,				offset.y),			glm::vec2(0.f, 0.f), 
+			glm::vec2(offset.x + size.x,	offset.y),			glm::vec2(1.f, 0.f), 
+			glm::vec2(offset.x,				offset.y + size.y),	glm::vec2(0.f, 1.f), 
+			glm::vec2(offset.x + size.x,	offset.y + size.y),	glm::vec2(1.f, 1.f),
 		};
-		Primitives::draw_triangle(background_pivots[0], background_pivots[1], background_pivots[2], m_background.name, uv_scale, 1.f);
-		Primitives::draw_triangle(background_pivots[1], background_pivots[2], background_pivots[3], m_background.name, uv_scale, 1.f);
+		Primitives::draw_triangle(v[0], v[1], v[2], v[3], v[4], v[5], m_texture.name, size, 1.f);
+		Primitives::draw_triangle(v[2], v[3], v[4], v[5], v[6], v[7], m_texture.name, size, 1.f);
+	}
+
+	if (m_show_trace) {
+		for (int t = 0; t != 10; t++) {
+			float time = t / 9.f;
+			for (unsigned int i = 0; i < triangles.size(); i++) {
+				Triangle & tri = triangles[i];
+				MeshVertex & p0 = vertexes[tri.indexes[0]];	glm::vec2 p0_pos = p0.get_pos(time);
+				MeshVertex & p1 = vertexes[tri.indexes[1]]; glm::vec2 p1_pos = p1.get_pos(time);
+				MeshVertex & p2 = vertexes[tri.indexes[2]]; glm::vec2 p2_pos = p2.get_pos(time);
+				Primitives::draw_line(p0_pos, p1_pos, ed_scale, Color::Grey, Color::Grey, 1.f);
+				Primitives::draw_line(p1_pos, p2_pos, ed_scale, Color::Grey, Color::Grey, 1.f);
+				Primitives::draw_line(p2_pos, p0_pos, ed_scale, Color::Grey, Color::Grey, 1.f);
+			}
+		}
+	}
+
+	if (m_show_pivots) {
+		for (int t = 0; t != 10; t++) {
+			float time = t / 9.f;
+			for (unsigned int i = 0; i < vertexes.size(); i++) {
+				MeshVertex & vertes = vertexes[i];
+				if (vertes.locked) {
+					Primitives::draw_pivot(vertes.get_pos(time) * ed_scale, Color::Grey, editor.editor_transform.scale);
+				}
+			}
+		}
 	}
 
 	if (m_texture.loaded) {
-		const glm::vec2 & size = uv_scale;
-		Vertex texture_pivots[4] = {
-			{ glm::vec2(0.f, 0.f), glm::vec2(0.f, 0.f), false }, 
-			{ glm::vec2(1.f, 0.f), glm::vec2(1.f, 0.f), false }, 
-			{ glm::vec2(0.f, 1.f), glm::vec2(0.f, 1.f), false }, 
-			{ glm::vec2(1.f, 1.f), glm::vec2(1.f, 1.f), false }
+		const glm::vec2 & size = ed_scale;
+		static glm::vec2 v[8] = {
+			glm::vec2(0.f, 0.f), glm::vec2(0.f, 0.f), 
+			glm::vec2(1.f, 0.f), glm::vec2(1.f, 0.f), 
+			glm::vec2(0.f, 1.f), glm::vec2(0.f, 1.f), 
+			glm::vec2(1.f, 1.f), glm::vec2(1.f, 1.f),
 		};
-		Primitives::draw_triangle(texture_pivots[0], texture_pivots[1], texture_pivots[2], m_texture.name, size, .3f);
-		Primitives::draw_triangle(texture_pivots[1], texture_pivots[2], texture_pivots[3], m_texture.name, size, .3f);
+		Primitives::draw_triangle(v[0], v[1], v[2], v[3], v[4], v[5], m_texture.name, size, .3f);
+		Primitives::draw_triangle(v[2], v[3], v[4], v[5], v[6], v[7], m_texture.name, size, .3f);	
 
 		for (unsigned int i = 0; i < triangles.size(); i++) {
 			Triangle & tri = triangles[i];
-			Vertex & p0 = vertexes[tri.indexes[0]];
-			Vertex & p1 = vertexes[tri.indexes[1]];
-			Vertex & p2 = vertexes[tri.indexes[2]];
-			Primitives::draw_triangle(p0, p1, p2, m_texture.name, size, 1.f);
-		}	
+			MeshVertex & p0 = vertexes[tri.indexes[0]];
+			MeshVertex & p1 = vertexes[tri.indexes[1]];
+			MeshVertex & p2 = vertexes[tri.indexes[2]];
+			Primitives::draw_triangle(p0.get_pos(m_time), p0.get_uv(m_time), p1.get_pos(m_time), p1.get_uv(m_time), p2.get_pos(m_time), p2.get_uv(m_time), m_texture.name, size, 1.f);
+		}
 	} 
-	Primitives::draw_ruler(uv_scale);
+	Primitives::draw_ruler(ed_scale);
 
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Primitives::draw_pivot(vertexes[i].position * uv_scale, vertexes[i].locked ? Color::Green : Color::Blue, editor.editor_transform.scale);
+		Primitives::draw_pivot(vertexes[i].get_pos(m_time) * ed_scale, vertexes[i].locked ? Color::Green : Color::Blue, editor.editor_transform.scale);
 	}
 
 	for (unsigned int i = 0; i < triangles.size(); i++) {
 		Triangle & tri = triangles[i];
-		Vertex & p0 = vertexes[tri.indexes[0]];
-		Vertex & p1 = vertexes[tri.indexes[1]];
-		Vertex & p2 = vertexes[tri.indexes[2]];
-		Primitives::draw_line(p0.position, p1.position, uv_scale, p0.locked ? Color::Green : Color::Blue, p1.locked ? Color::Green : Color::Blue);
-		Primitives::draw_line(p1.position, p2.position, uv_scale, p1.locked ? Color::Green : Color::Blue, p2.locked ? Color::Green : Color::Blue);
-		Primitives::draw_line(p2.position, p0.position, uv_scale, p2.locked ? Color::Green : Color::Blue, p0.locked ? Color::Green : Color::Blue);
+		MeshVertex & p0 = vertexes[tri.indexes[0]];	glm::vec2 p0_pos = p0.get_pos(m_time);
+		MeshVertex & p1 = vertexes[tri.indexes[1]]; glm::vec2 p1_pos = p1.get_pos(m_time);
+		MeshVertex & p2 = vertexes[tri.indexes[2]]; glm::vec2 p2_pos = p2.get_pos(m_time);
+		Primitives::draw_line(p0_pos, p1_pos, ed_scale, p0.locked ? Color::Green : Color::Blue, p1.locked ? Color::Green : Color::Blue, 1.f);
+		Primitives::draw_line(p1_pos, p2_pos, ed_scale, p1.locked ? Color::Green : Color::Blue, p2.locked ? Color::Green : Color::Blue, 1.f);
+		Primitives::draw_line(p2_pos, p0_pos, ed_scale, p2.locked ? Color::Green : Color::Blue, p0.locked ? Color::Green : Color::Blue, 1.f);
 	}
 
 	if (multiple_selection && selection_editor == Geometry) {
@@ -372,6 +510,26 @@ void Window::render_timeline() {
 	const glm::mat4 & view = editor.view_matrix();
 	glMatrixMode(GL_MODELVIEW);
 	glLoadMatrixf(glm::value_ptr(view));
+
+	float frame_width = (float)width / (float)(frame_count + 1);
+	float time_per_frame = 1.f / frame_count;
+
+	for (unsigned int i = 0; i < vertexes.size(); i++) {
+		MeshVertex & vertex = vertexes[i];
+		if (vertex.locked) {
+			for (unsigned int k = 0; k < vertex.vertexes.size(); k++) {
+				int frame = int(vertex.vertexes[k].time / time_per_frame);
+				float x1 = (frame + 0) * frame_width;
+				float x2 = (frame + 1) * frame_width;
+				Primitives::draw_region(glm::vec2(x1, 0), glm::vec2(x2, 100), Color::Green, 0.4f);
+			}
+		}
+	}
+
+	int frame = int(m_time / time_per_frame);
+	float x1 = (frame + 0) * frame_width;
+	float x2 = (frame + 1) * frame_width;
+	Primitives::draw_rect(glm::vec2(x1, 0), glm::vec2(x2, 100), Color::Red);
 
 	SDL_GL_SwapWindow(editor.window);
 }
@@ -402,9 +560,9 @@ bool Window::hit_test(EditorType type, glm::vec2 mouse) {
 	Editor & editor = editors[type];
 	mouse = editor.mouse_global_to_local(mouse.x, mouse.y);
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Vertex & vertex = vertexes[i];
-		if (type == Geometry && glm::length(vertex.position * uv_scale - mouse) < 2.f) return true;;
-		if (type == Texture && glm::length(vertex.texture_uv * uv_scale - mouse) < 2.f) return true;
+		MeshVertex & vertex = vertexes[i];
+		if (type == Geometry && glm::length(vertex.get_pos(m_time) * ed_scale - mouse) < 3.f) return true;
+		if (type == Texture && glm::length(vertex.get_uv(m_time) * ed_scale - mouse) < 3.f) return true;
 	}
 	return false;
 }
@@ -418,10 +576,10 @@ int Window::select_vertex(EditorType type, glm::vec2 mouse, bool add) {
 	Editor & editor = editors[type];
 	mouse = editor.mouse_global_to_local(mouse.x, mouse.y);
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Vertex & vertex = vertexes[i];
+		MeshVertex & vertex = vertexes[i];
 		bool pick = false;
-		pick = pick || type == Geometry && glm::length(vertex.position * uv_scale - mouse) < 2.f;
-		pick = pick || type == Texture && glm::length(vertex.texture_uv * uv_scale - mouse) < 2.f;
+		pick = pick || type == Geometry && glm::length(vertex.get_pos(m_time) * ed_scale - mouse) < 3.f;
+		pick = pick || type == Texture && glm::length(vertex.get_uv(m_time) * ed_scale - mouse) < 3.f;
 		bool prev_lock = vertex.locked;
 		bool next_lock = add ? (pick ? !vertex.locked : vertex.locked) : pick;
 		vertex.locked = next_lock;
@@ -444,10 +602,10 @@ void Window::select_vertex_range(EditorType type, glm::vec2 start, glm::vec2 end
 	start = editor.mouse_global_to_local(start.x, start.y);
 	end = editor.mouse_global_to_local(end.x, end.y);
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Vertex & vertex = vertexes[i];
+		MeshVertex & vertex = vertexes[i];
 		bool pick = false;
-		pick = pick || (type == Geometry && INSIDE((vertex.position * uv_scale), start, end));
-		pick = pick || (type == Texture	&& INSIDE((vertex.texture_uv * uv_scale), start, end));
+		pick = pick || (type == Geometry && INSIDE((vertex.get_pos(m_time) * ed_scale), start, end));
+		pick = pick || (type == Texture	&& INSIDE((vertex.get_uv(m_time) * ed_scale), start, end));
 		bool prev_lock = vertex.locked;
 		bool next_lock = add ? (pick ? !vertex.locked : vertex.locked) : pick;
 		vertex.locked = next_lock;
@@ -461,16 +619,19 @@ void Window::select_vertex_range(EditorType type, glm::vec2 start, glm::vec2 end
 void Window::add_vertex(glm::vec2 position) {
 	push_state();
 
-	Vertex v;
-	v.position = v.texture_uv = position / uv_scale;
-	v.locked = true;
-	vertexes.push_back(v);
+	MeshVertex mv;
+	{
+		Vertex & v = mv.vertex(m_time);
+		v.position = v.texture_uv = position / ed_scale;
+	}
+	mv.locked = true;
+	vertexes.push_back(mv);
 }
 
 void Window::add_triangle_from_selection() {
 	std::vector<int> selected;
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Vertex & vertex = vertexes[i];
+		MeshVertex & vertex = vertexes[i];
 		if (vertex.locked) {
 			selected.push_back(i);
 		}
@@ -494,7 +655,7 @@ void Window::add_triangle_from_selection() {
 void Window::del_triangle_from_selection() {
 	std::vector<int> selected;
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Vertex & vertex = vertexes[i];
+		MeshVertex & vertex = vertexes[i];
 		if (vertex.locked) {
 			selected.push_back(i);
 		}
@@ -516,7 +677,7 @@ void Window::del_vertexes_from_selection() {
 
 	std::vector<int> selected;
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Vertex & vertex = vertexes[i];
+		MeshVertex & vertex = vertexes[i];
 		if (vertex.locked) {
 			selected.push_back(i);			
 		}
@@ -553,10 +714,11 @@ void Window::del_vertexes_from_selection() {
 
 void Window::move_selected_vertexes(EditorType type, glm::vec2 vector) {
 	for (unsigned int i = 0; i < vertexes.size(); i++) {
-		Vertex & vertex = vertexes[i];
-		if (vertex.locked) {
-			if (type == Geometry)	vertex.position += vector;
-			if (type == Texture)	vertex.texture_uv += vector / uv_scale;
+		MeshVertex & mv = vertexes[i];
+		if (mv.locked) {
+			Vertex & vertex = mv.vertex(m_time);
+			if (type == Geometry)	vertex.position += vector / ed_scale;
+			if (type == Texture)	vertex.texture_uv += vector / ed_scale;
 		}
 	}
 }

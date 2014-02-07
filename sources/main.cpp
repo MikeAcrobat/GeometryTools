@@ -11,10 +11,10 @@ int main(int agrc, char * argv[]) {
 	const int space = 10;
 	const int window_size = 512;
 
-	const char * g_title = "Geometry";
+	const char * g_title = "Geometry Edit";
 	const int g_w_x = offset_x;
 	const int g_w_y = offset_y;
-	const char * t_title = "Texture";
+	const char * t_title = "Texture Edit";
 	const int t_w_x = offset_x + window_size + space;
 	const int t_w_y = offset_y;
 	const char * a_title = "Timeline";
@@ -47,8 +47,8 @@ int main(int agrc, char * argv[]) {
 	{
 		timeline.type = Timeline;
 		timeline.window = SDL_CreateWindow(a_title, a_w_x, a_w_y, window_size * 2 + space, 50, SDL_WINDOW_OPENGL);
-		timeline.editor_transform.scale = 1;
-		editor.editors[Timeline]  = timeline;
+		timeline.editor_transform.scale				= default_scale;
+		editor.editors[Timeline]					= timeline;
 	}
 
 	editor.context = SDL_GL_CreateContext(editor.editors[Geometry].window);

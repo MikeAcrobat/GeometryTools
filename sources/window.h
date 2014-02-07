@@ -18,7 +18,17 @@ struct EditorTransformation {
 struct Vertex {
 	glm::vec2	position;
 	glm::vec2	texture_uv;
-	bool		locked;
+	float		time;
+};
+
+struct MeshVertex {
+	std::vector<Vertex> vertexes;
+	bool locked;
+
+	glm::vec2	get_pos(float time);
+	glm::vec2	get_uv(float time);
+	Vertex &	vertex(float time);
+	void		sort();
 };
 
 struct Triangle {
@@ -42,7 +52,7 @@ struct Editor {
 };
 
 struct GeomState {
-	std::vector<Vertex>		vertexes;
+	std::vector<MeshVertex>	vertexes;
 	std::vector<Triangle>	triangles;
 };
 
@@ -59,6 +69,12 @@ class Window {
 	bool					m_background_edit;
 	glm::vec2				m_background_offset;
 
+	bool					m_show_trace;
+	bool					m_show_pivots;
+
+	bool					m_play;
+	float					m_time;
+
 	bool					wheel_lock;
 	bool					mouse_down;
 	bool					moving_geometry;
@@ -69,7 +85,7 @@ class Window {
 	bool					multiple_selection_init;
 	glm::vec2				start_selection, end_selection;
 	
-	std::vector<Vertex>		vertexes;
+	std::vector<MeshVertex>	vertexes;
 	std::vector<Triangle>	triangles;
 
 	std::deque<GeomState>	state_stack;

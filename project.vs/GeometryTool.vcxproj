@@ -93,6 +93,9 @@
     <ClInclude Include="..\sources\stbi_image.h" />
     <ClInclude Include="..\sources\window.h" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\README.txt" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
