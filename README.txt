@@ -5,8 +5,8 @@ Hotkeys :
 R - reset views
 T - reset background
 
-F - add face (3 triangles must be selected)
-D - remove face (3 triangles must be selected)
+F - add face (3 vertexes must be selected)
+D - remove face (3 vertexes must be selected)
 Delete - delete vertex/vertexes
 
 Ctrl + Z - undo
